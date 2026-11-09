@@ -218,3 +218,75 @@ def test_analytics_distinguishes_latest_and_cumulative(client):
     assert data1["cumulative_stats"]["total_profit_accumulated"] == 100.0
     assert data1["cumulative_stats"]["max_profit_achieved"] == 100.0
 
+
+
+def test_bulk_create_and_seed_jobs(client):
+    """Test bulk job creation and seed sample jobs endpoint."""
+    # 1. Seed textbook jobs
+    seed_res = client.post("/jobs/seed")
+    assert seed_res.status_code == 201
+    assert seed_res.json()["data"]["total_created"] == 5
+
+    # 2. Re-seeding without force skips duplicates
+    seed_res2 = client.post("/jobs/seed")
+    assert seed_res2.status_code == 201
+    assert seed_res2.json()["data"]["total_created"] == 0
+    assert len(seed_res2.json()["data"]["skipped_jobs"]) == 5
+
+    # 3. Bulk insert custom batch
+    bulk_payload = {
+        "jobs": [
+            {"job_name": "Batch_A", "deadline": 2, "profit": 200},
+            {"job_name": "Batch_B", "deadline": 1, "profit": 80},
+        ],
+        "allow_duplicates": False
+    }
+    bulk_res = client.post("/jobs/bulk", json=bulk_payload)
+    assert bulk_res.status_code == 201
+    assert bulk_res.json()["data"]["total_created"] == 2
+
+
+def test_batch_mode_scheduling_and_data_isolation(client):
+    """Test data isolation: Run #1 (5 jobs), Run #2 (3 jobs), job deletion leaves history intact."""
+    # Seed Run #1 jobs: J1..J5
+    client.post("/jobs/seed")
+    run1_res = client.post("/schedule/run", json={"mode": "ALL_ACTIVE"})
+    assert run1_res.status_code == 200
+    run1_id = run1_res.json()["data"]["run_id"]
+    assert run1_res.json()["data"]["total_jobs_considered"] == 5
+
+    # Add Run #2 batch: J6, J7, J8
+    j6 = client.post("/jobs", json={"job_name": "J6", "deadline": 1, "profit": 50}).json()["data"]["id"]
+    j7 = client.post("/jobs", json={"job_name": "J7", "deadline": 2, "profit": 150}).json()["data"]["id"]
+    j8 = client.post("/jobs", json={"job_name": "J8", "deadline": 2, "profit": 300}).json()["data"]["id"]
+
+    # Run scheduler only for batch J6, J7, J8
+    run2_res = client.post("/schedule/run", json={"mode": "BATCH", "job_ids": [j6, j7, j8]})
+    assert run2_res.status_code == 200
+    run2_id = run2_res.json()["data"]["run_id"]
+    assert run2_res.json()["data"]["total_jobs_considered"] == 3
+    assert run2_res.json()["data"]["scheduling_mode"] == "BATCH"
+
+    # Verify Run #1 and Run #2 have independent snapshots
+    detail1 = client.get(f"/schedule/history/{run1_id}").json()["data"]
+    detail2 = client.get(f"/schedule/history/{run2_id}").json()["data"]
+    assert detail1["total_jobs"] == 5
+    assert detail2["total_jobs"] == 3
+    assert {r["job_name"] for r in detail2["results"]} == {"J6", "J7", "J8"}
+
+    # Test Run Comparison
+    comp_res = client.post("/schedule/compare", json={"run_ids": [run1_id, run2_id]})
+    assert comp_res.status_code == 200
+    assert len(comp_res.json()["data"]["runs"]) == 2
+
+    # Delete J1 from active jobs
+    jobs_list = client.get("/jobs").json()["data"]
+    j1_obj = next(j for j in jobs_list if j["job_name"] == "J1")
+    client.delete(f"/jobs/{j1_obj['id']}")
+
+    # Verify Run #1 history is completely intact (data isolation rule!)
+    detail1_after = client.get(f"/schedule/history/{run1_id}").json()["data"]
+    assert detail1_after["total_jobs"] == 5
+    j1_result = next(r for r in detail1_after["results"] if r["job_name"] == "J1")
+    assert j1_result["profit"] == 100.0
+    assert j1_result["assigned_slot"] == 2

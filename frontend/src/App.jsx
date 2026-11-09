@@ -1,122 +1,90 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
-function App() {
-  const [count, setCount] = useState(0)
+import Sidebar from './components/Sidebar';
+import Navbar from './components/Navbar';
+import LoadingSpinner from './components/LoadingSpinner';
+import { checkHealth, getScheduleHistory } from './services/api';
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Jobs = lazy(() => import('./pages/Jobs'));
+const Scheduler = lazy(() => import('./pages/Scheduler'));
+const Results = lazy(() => import('./pages/Results'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Algorithm = lazy(() => import('./pages/Algorithm'));
+
+export default function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [backendHealthy, setBackendHealthy] = useState(false);
+  const [lastRunSummary, setLastRunSummary] = useState(null);
+
+  // Ping backend health and fetch latest run info
+  useEffect(() => {
+    let isMounted = true;
+
+    const verifyBackend = async () => {
+      try {
+        const health = await checkHealth();
+        if (isMounted) {
+          setBackendHealthy(health?.status === 'healthy');
+        }
+      } catch {
+        if (isMounted) {
+          setBackendHealthy(false);
+        }
+      }
+
+      try {
+        const history = await getScheduleHistory();
+        if (isMounted && history && history.length > 0) {
+          setLastRunSummary(history[0]);
+        }
+      } catch {
+        // Ignored
+      }
+    };
+
+    verifyBackend();
+    const interval = setInterval(verifyBackend, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <Router>
+      <div className="min-h-screen bg-[#0a0f1d] text-slate-100 flex">
+        {/* Persistent Responsive Sidebar */}
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          backendHealthy={backendHealthy}
+        />
 
-      <div className="ticks"></div>
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-w-0 lg:pl-64">
+          <Navbar
+            onOpenSidebar={() => setSidebarOpen(true)}
+            backendHealthy={backendHealthy}
+            lastRunSummary={lastRunSummary}
+          />
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+          <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+            <Suspense fallback={<LoadingSpinner message="Loading view..." size="large" />}>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/jobs" element={<Jobs />} />
+                <Route path="/scheduler" element={<Scheduler />} />
+                <Route path="/results" element={<Results />} />
+                <Route path="/analytics" element={<Analytics />} />
+                <Route path="/algorithm" element={<Algorithm />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
+          </main>
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      </div>
+    </Router>
+  );
 }
-
-export default App

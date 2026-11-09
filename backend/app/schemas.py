@@ -3,7 +3,7 @@ Pydantic schemas for request validation and response serialization.
 """
 
 from datetime import datetime
-from typing import Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 T = TypeVar("T")
@@ -65,6 +65,19 @@ class JobCreate(JobBase):
     )
 
 
+class JobBulkCreate(BaseModel):
+    """Schema for adding multiple jobs in a single request."""
+    jobs: List[JobCreate]
+    allow_duplicates: bool = False
+
+
+class JobBulkCreateResponse(BaseModel):
+    """Response returned after bulk job insertion."""
+    created_jobs: List["JobResponse"]
+    skipped_jobs: List[str] = []
+    total_created: int
+
+
 class JobUpdate(BaseModel):
     """Schema for updating an existing job."""
     job_name: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -105,13 +118,35 @@ class JobResponse(JobBase):
 # Scheduling Schemas
 # ==============================================================================
 
+class ScheduleRunRequest(BaseModel):
+    """Request payload for triggering scheduling runs."""
+    mode: str = Field(
+        default="ALL_ACTIVE",
+        description="Scheduling mode: 'ALL_ACTIVE' or 'BATCH'"
+    )
+    job_ids: Optional[List[int]] = Field(
+        default=None,
+        description="List of specific Job IDs to schedule when mode is 'BATCH'"
+    )
+
+
 class ScheduledJobItem(BaseModel):
-    """Single scheduled job item details."""
+    """Single scheduled job item details with profit contribution."""
     job_id: Optional[int] = None
     job_name: str
     deadline: int
     profit: float
     assigned_slot: int
+    profit_contribution_pct: float = 0.0
+
+
+class RejectedJobItem(BaseModel):
+    """Detailed rejection reason for unscheduled jobs."""
+    job_id: Optional[int] = None
+    job_name: str
+    deadline: int
+    profit: float
+    reason: str
 
 
 class SchedulingResultDetail(BaseModel):
@@ -123,6 +158,8 @@ class SchedulingResultDetail(BaseModel):
     profit: float
     assigned_slot: Optional[int]
     status: str
+    rejection_reason: Optional[str] = None
+    profit_contribution: Optional[float] = 0.0
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -130,14 +167,17 @@ class SchedulingResultDetail(BaseModel):
 class SchedulingData(BaseModel):
     """Data payload for POST /schedule/run."""
     run_id: int
+    scheduling_mode: str = "ALL_ACTIVE"
     total_profit: float
     scheduled_jobs: List[ScheduledJobItem]
     rejected_jobs: List[str]
+    rejected_details: List[RejectedJobItem] = []
     time_slots: Dict[int, Optional[str]]
     total_jobs_considered: int
     scheduled_count: int
     rejected_count: int
     max_deadline: int
+    execution_steps: List[Dict[str, Any]] = []
     created_at: datetime
 
 
@@ -145,6 +185,7 @@ class SchedulingRunSummary(BaseModel):
     """Summary of a historical scheduling run."""
     id: int
     run_at: datetime
+    scheduling_mode: str = "ALL_ACTIVE"
     total_profit: float
     total_jobs: int
     scheduled_count: int
@@ -155,8 +196,37 @@ class SchedulingRunSummary(BaseModel):
 
 
 class SchedulingRunDetail(SchedulingRunSummary):
-    """Full detail of a scheduling run including all result items."""
+    """Full detail of a scheduling run including all result items and snapshots."""
     results: List[SchedulingResultDetail]
+
+
+# ==============================================================================
+# Run Comparison Schemas
+# ==============================================================================
+
+class CompareRunsRequest(BaseModel):
+    """Request payload to compare two or more scheduling runs."""
+    run_ids: List[int] = Field(..., min_length=1)
+
+
+class RunComparisonItem(BaseModel):
+    """Comparative metrics for a single run."""
+    run_id: int
+    run_at: datetime
+    scheduling_mode: str
+    total_jobs: int
+    scheduled_count: int
+    rejected_count: int
+    total_profit: float
+    acceptance_rate: float
+    avg_profit_per_scheduled_job: float
+    scheduled_job_names: List[str]
+
+
+class CompareRunsResponse(BaseModel):
+    """Full response comparing historical runs."""
+    runs: List[RunComparisonItem]
+    comparison_chart: List[Dict[str, Any]]
 
 
 # ==============================================================================
@@ -167,6 +237,7 @@ class LatestRunAnalytics(BaseModel):
     """Summary of the most recent scheduling run."""
     run_id: int
     run_at: datetime
+    scheduling_mode: str = "ALL_ACTIVE"
     total_profit: float
     total_jobs: int
     scheduled_count: int
@@ -191,4 +262,3 @@ class AnalyticsData(BaseModel):
     total_runs: int
     latest_run: Optional[LatestRunAnalytics] = None
     cumulative_stats: CumulativeStats
-

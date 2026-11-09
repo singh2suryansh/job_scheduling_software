@@ -46,6 +46,7 @@ def get_analytics(db: Session = Depends(get_db)):
         latest_run_data = LatestRunAnalytics(
             run_id=latest_run_obj.id,
             run_at=latest_run_obj.run_at,
+            scheduling_mode=getattr(latest_run_obj, "scheduling_mode", "ALL_ACTIVE"),
             total_profit=latest_run_obj.total_profit,
             total_jobs=latest_run_obj.total_jobs,
             scheduled_count=latest_run_obj.scheduled_count,
